@@ -1,5 +1,10 @@
 # Mowing detection
 
+## 20220912：适配到非洲草地割草事件检测。
+
+
+===========================================================
+
 &copy;
 Copyright 2021 Marcel Schwieder and Max Wesemeyer
 

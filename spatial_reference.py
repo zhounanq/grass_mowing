@@ -6,12 +6,8 @@ Image operations
 Author: Zhou Ya'nan
 """
 import os
-import time
-import datetime
 import argparse
-import gc
-import numpy as np
-import pandas as pd
+
 
 from osgeo import gdal, osr
 
@@ -53,10 +49,8 @@ def copy_spatialref(img_path4, img_path2):
 
 
 def main():
-    now = datetime.datetime.now()
     print("###########################################################")
     print("### Spatial Reference #####################################")
-    print("### ", now)
     print("###########################################################")
 
     # parameters

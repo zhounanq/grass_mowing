@@ -246,6 +246,8 @@ def detect_mowing_event(xs, ys, min_interval, type='ConHull', nOrder=3, model='l
         except Exception as e:
             print("")
 
+        if np.all(np.isnan(vi_peak_sub)):
+            return None, None
         season_mid_index = np.nanargmax(vi_peak_sub)
         season_mid_index = mid_start_index + season_mid_index
 
@@ -331,7 +333,7 @@ def detect_mowing_event(xs, ys, min_interval, type='ConHull', nOrder=3, model='l
                 Yarr = [Y[Y0], Y[early_peak_index_2], Y[early_peak_index_1], Y[season_mid_index], Y[late_peak_index_1], Y[late_peak_index_2], Y[len(Y) - 1]]
     else:
         print("")
-        return np.nan, np.nan
+        return None, None
 
     ###############################################################
     if model == 'linear':
@@ -497,7 +499,7 @@ def test_modis_ndvi():
     plt.show()
 
 
-def main_X21Y07():
+def main_XXXYYYY(in_vicsv, out_mowcsv, min_idx):
     print("###########################################################")
     print("### Grass mowing event detection ##########################")
     print("###########################################################")
@@ -507,8 +509,84 @@ def main_X21Y07():
                                   201,209,217,225,233,241,249,257,265,273,281,289,297,
                                   305,313,321,329,337,345,353,361])
 
-    vicsv_file = r'I:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X21Y07\csv\csv_vits_MODIS_ndvi_c.csv'
-    result_file = r'I:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X21Y07\csv\csv_vits_MODIS_ndvi_c_mowing.csv'
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
+
+    ###########################################################
+    # hyper parameters for X22Y07
+    no_data = -0.9999
+    minval_idx = min_idx
+    max_mowing = 9
+    global g_season_start; g_season_start = 0.1
+    global g_season_end; g_season_end = 0.9
+    # define end of grassland season
+    global g_end_grass_season; g_end_grass_season = 0.85  # DOY
+    global g_peak_start; g_peak_start = 0.33  # DOY 120
+    global g_peak_end; g_peak_end = 0.66  # DOY 240
+
+    ###########################################################
+    # reading csv data
+    csv_data = pd.read_csv(vicsv_file, header=0)
+
+    csv_header = csv_data.iloc[:, :5]
+    csv_array = csv_data.iloc[:, 5:]
+
+    (row, col) = csv_array.shape
+    print("### Total row {}, and total time step {}".format(row, col))
+
+    ###########################################################
+    # detecting mowing events
+    mowing_doy_array = np.zeros([row, max_mowing], dtype='int')
+    for rr in range(0, row):
+
+        row_array = np.array(csv_array.iloc[rr]).astype('int')
+        if not check_time_series_array(row_array):
+            print("ROW {}: Time-series data wrong".format(rr))
+            continue
+
+        row_array = row_array*0.0001
+        row_array[row_array==no_data] = np.nan
+
+        re_xs, re_ys = adjust_timeseries_min(row_array, tstep_array_modis, min_index=minval_idx)
+
+        mowing_doy, diff_sum = detect_mowing_event(re_xs, tstep_array_modis / 365.0, min_interval=15, type='ConHull', nOrder=2, model='poly')
+        if mowing_doy is None or diff_sum is None:
+            print("ROW {}: Nothing found".format(rr))
+            continue
+
+        mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
+        mowing_doy = np.sort(mowing_doy)
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
+        mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
+        mowing_num = sum(mowing_doy != 0)
+
+        mowing_doy_array[rr] = mowing_doy
+        print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
+    # for
+
+    ###########################################################
+    # writing results
+    array_columns = ["mow_{}".format(ii+1) for ii in range(0, max_mowing)]
+    result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
+    result_df = pd.concat([csv_header, result_array], axis=1)
+    result_df.to_csv(result_file, header=True, index=False)
+
+    print("### Task over #############################################")
+
+
+def main_X21Y07(in_vicsv, out_mowcsv):
+    print("###########################################################")
+    print("### Grass mowing event detection ##########################")
+    print("###########################################################")
+
+    tstep_array_modis = np.array([1,9,17,25,33,41,49,57,65,73,81,89,97,
+                                  105,113,121,129,137,145,153,161,169,177,185,193,
+                                  201,209,217,225,233,241,249,257,265,273,281,289,297,
+                                  305,313,321,329,337,345,353,361])
+
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
 
     ###########################################################
     # hyper parameters for X21Y07
@@ -538,7 +616,7 @@ def main_X21Y07():
     for rr in range(0, row):
 
         row_array = csv_array.iloc[rr].to_numpy().astype('int')
-        if check_time_series_array(row_array)==False:
+        if not check_time_series_array(row_array):
             print("ROW {}: Time-series data wrong".format(rr))
             continue
 
@@ -552,9 +630,10 @@ def main_X21Y07():
 
         mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
         mowing_doy = np.sort(mowing_doy)
-        if len(mowing_doy)>max_mowing : mowing_doy = mowing_doy[:max_mowing]
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
         mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
-        mowing_num = sum(mowing_doy!=0)
+        mowing_num = sum(mowing_doy != 0)
 
         mowing_doy_array[rr] = mowing_doy
         print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
@@ -565,7 +644,309 @@ def main_X21Y07():
     array_columns = ["mow_{}".format(ii+1) for ii in range(0,9)]
     result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
     result_array = pd.concat([csv_header, result_array], axis=1)
-    result_array.to_csv(result_file, header=False, index=False)
+    result_array.to_csv(result_file, header=True, index=False)
+
+    print("### Task over #############################################")
+
+
+def main_X22Y07(in_vicsv, out_mowcsv):
+    print("###########################################################")
+    print("### Grass mowing event detection ##########################")
+    print("###########################################################")
+
+    tstep_array_modis = np.array([1,9,17,25,33,41,49,57,65,73,81,89,97,
+                                  105,113,121,129,137,145,153,161,169,177,185,193,
+                                  201,209,217,225,233,241,249,257,265,273,281,289,297,
+                                  305,313,321,329,337,345,353,361])
+
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
+
+    ###########################################################
+    # hyper parameters for X22Y07
+    no_data = -0.9999
+    minval_idx = 9
+    max_mowing = 9
+    global g_season_start; g_season_start = 0.1
+    global g_season_end; g_season_end = 0.9
+    # define end of grassland season
+    global g_end_grass_season; g_end_grass_season = 0.85  # DOY
+    global g_peak_start; g_peak_start = 0.33  # DOY 120
+    global g_peak_end; g_peak_end = 0.66  # DOY 240
+
+    ###########################################################
+    # reading csv data
+    csv_data = pd.read_csv(vicsv_file, header=0)
+
+    csv_header = csv_data.iloc[:, :5]
+    csv_array = csv_data.iloc[:, 5:]
+
+    (row, col) = csv_array.shape
+    print("### Total row {}, and total time step {}".format(row, col))
+
+    ###########################################################
+    # detecting mowing events
+    mowing_doy_array = np.zeros([row, max_mowing], dtype='int')
+    for rr in range(0, row):
+
+        row_array = np.array(csv_array.iloc[rr]).astype('int')
+        if not check_time_series_array(row_array):
+            print("ROW {}: Time-series data wrong".format(rr))
+            continue
+
+        row_array = row_array*0.0001
+        row_array[row_array==no_data] = np.nan
+
+        re_xs, re_ys = adjust_timeseries_min(row_array, tstep_array_modis, min_index=minval_idx)
+
+        mowing_doy, diff_sum = detect_mowing_event(re_xs, tstep_array_modis / 365.0, min_interval=15, type='ConHull', nOrder=2, model='poly')
+        if mowing_doy is None or diff_sum is None:
+            print("ROW {}: Nothing found".format(rr))
+            continue
+
+        mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
+        mowing_doy = np.sort(mowing_doy)
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
+        mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
+        mowing_num = sum(mowing_doy != 0)
+
+        mowing_doy_array[rr] = mowing_doy
+        print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
+    # for
+
+    ###########################################################
+    # writing results
+    array_columns = ["mow_{}".format(ii+1) for ii in range(0, max_mowing)]
+    result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
+    result_df = pd.concat([csv_header, result_array], axis=1)
+    result_df.to_csv(result_file, header=True, index=False)
+
+    print("### Task over #############################################")
+
+
+def main_X22Y08(in_vicsv, out_mowcsv):
+    print("###########################################################")
+    print("### Grass mowing event detection ##########################")
+    print("###########################################################")
+
+    tstep_array_modis = np.array([1,9,17,25,33,41,49,57,65,73,81,89,97,
+                                  105,113,121,129,137,145,153,161,169,177,185,193,
+                                  201,209,217,225,233,241,249,257,265,273,281,289,297,
+                                  305,313,321,329,337,345,353,361])
+
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
+
+    ###########################################################
+    # hyper parameters for X22Y08
+    no_data = -0.9999
+    minval_idx = 17
+    max_mowing = 9
+    global g_season_start; g_season_start = 0.1
+    global g_season_end; g_season_end = 0.9
+    # define end of grassland season
+    global g_end_grass_season; g_end_grass_season = 0.85  # DOY
+    global g_peak_start; g_peak_start = 0.33  # DOY 120
+    global g_peak_end; g_peak_end = 0.66  # DOY 240
+
+    ###########################################################
+    # reading csv data
+    csv_data = pd.read_csv(vicsv_file, header=0)
+
+    csv_header = csv_data.iloc[:, :5]
+    csv_array = csv_data.iloc[:, 5:]
+
+    (row, col) = csv_array.shape
+    print("### Total row {}, and total time step {}".format(row, col))
+
+    ###########################################################
+    # detecting mowing events
+    mowing_doy_array = np.zeros([row, max_mowing], dtype='int')
+    for rr in range(0, row):
+
+        row_array = np.array(csv_array.iloc[rr]).astype('int')
+        if not check_time_series_array(row_array):
+            print("ROW {}: Time-series data wrong".format(rr))
+            continue
+
+        row_array = row_array*0.0001
+        row_array[row_array==no_data] = np.nan
+
+        re_xs, re_ys = adjust_timeseries_min(row_array, tstep_array_modis, min_index=minval_idx)
+
+        mowing_doy, diff_sum = detect_mowing_event(re_xs, tstep_array_modis / 365.0, min_interval=15, type='ConHull', nOrder=2, model='poly')
+        if mowing_doy is None or diff_sum is None:
+            print("ROW {}: Nothing found".format(rr))
+            continue
+
+        mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
+        mowing_doy = np.sort(mowing_doy)
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
+        mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
+        mowing_num = sum(mowing_doy != 0)
+
+        mowing_doy_array[rr] = mowing_doy
+        print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
+    # for
+
+    ###########################################################
+    # writing results
+    array_columns = ["mow_{}".format(ii+1) for ii in range(0, max_mowing)]
+    result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
+    result_df = pd.concat([csv_header, result_array], axis=1)
+    result_df.to_csv(result_file, header=True, index=False)
+
+    print("### Task over #############################################")
+
+
+def main_X22Y09(in_vicsv, out_mowcsv):
+    print("###########################################################")
+    print("### Grass mowing event detection ##########################")
+    print("###########################################################")
+
+    tstep_array_modis = np.array([1,9,17,25,33,41,49,57,65,73,81,89,97,
+                                  105,113,121,129,137,145,153,161,169,177,185,193,
+                                  201,209,217,225,233,241,249,257,265,273,281,289,297,
+                                  305,313,321,329,337,345,353,361])
+
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
+
+    ###########################################################
+    # hyper parameters for X22Y09
+    no_data = -0.9999
+    minval_idx = 18
+    max_mowing = 9
+    global g_season_start; g_season_start = 0.1
+    global g_season_end; g_season_end = 0.9
+    # define end of grassland season
+    global g_end_grass_season; g_end_grass_season = 0.85  # DOY
+    global g_peak_start; g_peak_start = 0.33  # DOY 120
+    global g_peak_end; g_peak_end = 0.66  # DOY 240
+
+    ###########################################################
+    # reading csv data
+    csv_data = pd.read_csv(vicsv_file, header=0)
+
+    csv_header = csv_data.iloc[:, :5]
+    csv_array = csv_data.iloc[:, 5:]
+
+    (row, col) = csv_array.shape
+    print("### Total row {}, and total time step {}".format(row, col))
+
+    ###########################################################
+    # detecting mowing events
+    mowing_doy_array = np.zeros([row, max_mowing], dtype='int')
+    for rr in range(0, row):
+
+        row_array = np.array(csv_array.iloc[rr]).astype('int')
+        if not check_time_series_array(row_array):
+            print("ROW {}: Time-series data wrong".format(rr))
+            continue
+
+        row_array = row_array*0.0001
+        row_array[row_array==no_data] = np.nan
+
+        re_xs, re_ys = adjust_timeseries_min(row_array, tstep_array_modis, min_index=minval_idx)
+
+        mowing_doy, diff_sum = detect_mowing_event(re_xs, tstep_array_modis / 365.0, min_interval=15, type='ConHull', nOrder=2, model='poly')
+        if mowing_doy is None or diff_sum is None:
+            print("ROW {}: Nothing found".format(rr))
+            continue
+
+        mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
+        mowing_doy = np.sort(mowing_doy)
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
+        mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
+        mowing_num = sum(mowing_doy != 0)
+
+        mowing_doy_array[rr] = mowing_doy
+        print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
+    # for
+
+    ###########################################################
+    # writing results
+    array_columns = ["mow_{}".format(ii+1) for ii in range(0, max_mowing)]
+    result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
+    result_df = pd.concat([csv_header, result_array], axis=1)
+    result_df.to_csv(result_file, header=True, index=False)
+
+    print("### Task over #############################################")
+
+
+def main_X23Y06(in_vicsv, out_mowcsv):
+    print("###########################################################")
+    print("### Grass mowing event detection ##########################")
+    print("###########################################################")
+
+    tstep_array_modis = np.array([1,9,17,25,33,41,49,57,65,73,81,89,97,
+                                  105,113,121,129,137,145,153,161,169,177,185,193,
+                                  201,209,217,225,233,241,249,257,265,273,281,289,297,
+                                  305,313,321,329,337,345,353,361])
+
+    vicsv_file = in_vicsv
+    result_file = out_mowcsv
+
+    ###########################################################
+    # hyper parameters for X23Y06
+    no_data = -0.9999
+    minval_idx = 30
+    max_mowing = 9
+    global g_season_start; g_season_start = 0.1
+    global g_season_end; g_season_end = 0.9
+    # define end of grassland season
+    global g_end_grass_season; g_end_grass_season = 0.85  # DOY
+    global g_peak_start; g_peak_start = 0.33  # DOY 120
+    global g_peak_end; g_peak_end = 0.66  # DOY 240
+
+    ###########################################################
+    # reading csv data
+    csv_data = pd.read_csv(vicsv_file, header=0)
+
+    csv_header = csv_data.iloc[:, :5]
+    csv_array = csv_data.iloc[:, 5:]
+
+    (row, col) = csv_array.shape
+    print("### Total row {}, and total time step {}".format(row, col))
+
+    ###########################################################
+    # detecting mowing events
+    mowing_doy_array = np.zeros([row, max_mowing], dtype='int')
+    for rr in range(0, row):
+
+        row_array = csv_array.iloc[rr].to_numpy().astype('int')
+        if not check_time_series_array(row_array):
+            print("ROW {}: Time-series data wrong".format(rr))
+            continue
+
+        row_array = row_array*0.0001
+        row_array[row_array==no_data] = np.nan
+
+        re_xs, re_ys = adjust_timeseries_min(row_array, tstep_array_modis, min_index=minval_idx)
+
+        mowing_doy, diff_sum = detect_mowing_event(re_xs, tstep_array_modis / 365.0, min_interval=15,
+                                                   type='ConHull', nOrder=2, model='poly')
+
+        mowing_doy = np.array([(doy+8*minval_idx)%368 for doy in mowing_doy]) - 1
+        mowing_doy = np.sort(mowing_doy)
+        if len(mowing_doy) > max_mowing:
+            mowing_doy = mowing_doy[:max_mowing]
+        mowing_doy = np.pad(mowing_doy, (0, max_mowing-len(mowing_doy)), 'constant', constant_values=(0, 0))
+        mowing_num = sum(mowing_doy != 0)
+
+        mowing_doy_array[rr] = mowing_doy
+        print("ROW {}: Mowing events @ {}".format(rr, mowing_doy))
+    # for
+
+    ###########################################################
+    # writing results
+    array_columns = ["mow_{}".format(ii+1) for ii in range(0, max_mowing)]
+    result_array = pd.DataFrame(mowing_doy_array, columns=array_columns)
+    result_df = pd.concat([csv_header, result_array], axis=1)
+    result_df.to_csv(result_file, header=True, index=False)
 
     print("### Task over #############################################")
 
@@ -575,10 +956,19 @@ def main():
     print("### Grass mowing event detection ##########################")
     print("###########################################################")
 
+    # in_vicsv = r'I:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X21Y07\csv\csv_vits_MODIS_ndvi_c.csv'
+    # out_mowcsv = r'I:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X21Y07\csv\csv_vits_MODIS_ndvi_c_mowing.csv'
+    # main_X21Y07(in_vicsv, out_mowcsv)
 
+    in_vicsv = r'J:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X22Y09\csv\MODIS_ndvi.csv'
+    out_mowcsv = r'J:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X22Y09\csv\MODIS_ndvi_mowing.csv'
+    main_X22Y09(in_vicsv, out_mowcsv)
+
+    # in_vicsv = r'J:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X23Y06\csv\X23Y06_MODIS_evi.csv'
+    # out_mowcsv = r'J:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X23Y06\csv\X23Y06_MODIS_evi_mowing.csv'
+    # main_X23Y06(in_vicsv, out_mowcsv)
 
     print("### Task over #############################################")
-
 
 
 if __name__ == "__main__":

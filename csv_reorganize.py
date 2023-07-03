@@ -41,7 +41,6 @@ def main():
     targetfile = r'I:\FF\application_dataset\africa_grass\01-Probav\PROBAV_S10_TOC_R1k\PROBAV_S10_TOC_X21Y07\csv\csv_vits_MODIS_ndvi_c.csv'
     csv_cross_merge(srcfile, targetfile)
 
-
     print("### Task over #############################################")
 
 
